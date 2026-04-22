@@ -3,6 +3,7 @@
 ![CI](https://github.com/Amnesiacman/secret-sentinel/actions/workflows/ci.yml/badge.svg)
 
 `secret-sentinel` is a Rust CLI scanner for detecting potential secret leaks in local files and CI.
+Current stability target: **v1.0**.
 
 ## Features
 
@@ -90,3 +91,7 @@ min_entropy_length = 20
 - `0`: no blocking issues (or strict mode disabled)
 - `1`: findings exist at or above selected threshold when `--strict` is enabled (`--fail-on`)
 - `3`: IO/config processing error (for example, baseline write failure)
+
+## Release notes
+
+See `CHANGELOG.md` for version-by-version changes.

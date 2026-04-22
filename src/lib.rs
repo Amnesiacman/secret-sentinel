@@ -217,10 +217,12 @@ fn should_skip_file(path: &Path, exclude_paths: &[String]) -> bool {
     let ignored_suffixes = [
         ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".tar",
     ];
-    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        if name.starts_with('.') && name != ".env" && name != ".env.example" {
-            return true;
-        }
+    if let Some(name) = path.file_name().and_then(|n| n.to_str())
+        && name.starts_with('.')
+        && name != ".env"
+        && name != ".env.example"
+    {
+        return true;
     }
     if exclude_paths
         .iter()
@@ -527,5 +529,25 @@ max_file_bytes = 2048
         assert_eq!(config.scanner.exclude_paths.len(), 1);
         assert_eq!(config.scanner.disable_rules.len(), 1);
         assert_eq!(config.scanner.max_file_bytes, 2048);
+    }
+
+    #[test]
+    fn sarif_output_contains_runs() {
+        let report = ScanReport {
+            schema_version: "1.0".to_string(),
+            scanned_files: 1,
+            total_findings: 1,
+            ok: false,
+            findings: vec![Finding {
+                file: "a.txt".to_string(),
+                line: 1,
+                rule: "generic_token_assignment".to_string(),
+                snippet: "TOKEN=abc".to_string(),
+                severity: Severity::Medium,
+            }],
+        };
+        let sarif = report_as_sarif(&report);
+        assert!(sarif.contains("\"runs\""));
+        assert!(sarif.contains("\"ruleId\""));
     }
 }
