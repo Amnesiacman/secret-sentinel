@@ -1,5 +1,5 @@
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -20,6 +20,11 @@ pub struct ScanReport {
     pub findings: Vec<Finding>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Baseline {
+    pub signatures: Vec<String>,
+}
+
 #[derive(Debug)]
 struct Rule {
     name: &'static str,
@@ -38,8 +43,10 @@ fn compile_rules() -> Vec<Rule> {
         },
         Rule {
             name: "generic_token_assignment",
-            regex: Regex::new(r#"(?i)(api[_-]?key|token|secret)\s*[:=]\s*["']?[A-Za-z0-9_\-]{16,}"#)
-                .expect("valid regex"),
+            regex: Regex::new(
+                r#"(?i)(api[_-]?key|token|secret)\s*[:=]\s*["']?[A-Za-z0-9_\-]{16,}"#,
+            )
+            .expect("valid regex"),
         },
         Rule {
             name: "private_key_header",
@@ -69,7 +76,9 @@ fn is_allowed(line: &str, allowlist: &[String]) -> bool {
 }
 
 fn should_skip_file(path: &Path) -> bool {
-    let ignored_suffixes = [".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".tar"];
+    let ignored_suffixes = [
+        ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".tar",
+    ];
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
         if name.starts_with('.') && name != ".env" && name != ".env.example" {
             return true;
@@ -96,6 +105,23 @@ fn collect_files(paths: &[PathBuf]) -> Vec<PathBuf> {
         }
     }
     files
+}
+
+pub fn finding_signature(finding: &Finding) -> String {
+    format!("{}|{}|{}", finding.file, finding.rule, finding.snippet)
+}
+
+pub fn load_baseline(path: Option<&Path>) -> Vec<String> {
+    let Some(path) = path else {
+        return vec![];
+    };
+    let Ok(content) = fs::read_to_string(path) else {
+        return vec![];
+    };
+    let Ok(parsed) = serde_json::from_str::<Baseline>(&content) else {
+        return vec![];
+    };
+    parsed.signatures
 }
 
 pub fn scan_paths(paths: &[PathBuf], allowlist_path: Option<&Path>) -> ScanReport {
@@ -132,6 +158,34 @@ pub fn scan_paths(paths: &[PathBuf], allowlist_path: Option<&Path>) -> ScanRepor
         ok: findings.is_empty(),
         findings,
     }
+}
+
+pub fn apply_baseline(report: ScanReport, baseline_signatures: &[String]) -> ScanReport {
+    if baseline_signatures.is_empty() {
+        return report;
+    }
+    let filtered_findings: Vec<Finding> = report
+        .findings
+        .into_iter()
+        .filter(|finding| {
+            let signature = finding_signature(finding);
+            !baseline_signatures.iter().any(|item| item == &signature)
+        })
+        .collect();
+
+    ScanReport {
+        scanned_files: report.scanned_files,
+        total_findings: filtered_findings.len(),
+        ok: filtered_findings.is_empty(),
+        findings: filtered_findings,
+    }
+}
+
+pub fn write_baseline(path: &Path, report: &ScanReport) -> std::io::Result<()> {
+    let signatures = report.findings.iter().map(finding_signature).collect();
+    let baseline = Baseline { signatures };
+    let content = serde_json::to_string_pretty(&baseline).expect("serialize baseline");
+    fs::write(path, content + "\n")
 }
 
 pub fn report_as_text(report: &ScanReport) -> String {
@@ -177,5 +231,20 @@ mod tests {
         let report = scan_paths(&[dir.path().to_path_buf()], Some(&allow_path));
         assert!(report.ok);
         assert_eq!(report.total_findings, 0);
+    }
+
+    #[test]
+    fn baseline_suppresses_known_finding() {
+        let dir = tempdir().expect("tempdir");
+        let file_path = dir.path().join("app.env");
+        fs::write(&file_path, "TOKEN=abcdefghijklmnopqrstuvwxyz123456\n").expect("write file");
+
+        let report = scan_paths(&[dir.path().to_path_buf()], None);
+        assert_eq!(report.total_findings, 1);
+        let signature = finding_signature(&report.findings[0]);
+
+        let filtered = apply_baseline(report, &[signature]);
+        assert!(filtered.ok);
+        assert_eq!(filtered.total_findings, 0);
     }
 }

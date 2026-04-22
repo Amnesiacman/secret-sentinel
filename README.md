@@ -13,6 +13,7 @@
   - Generic `token/api_key/secret` assignments
   - Private key headers
 - Allowlist support
+- Baseline file support for known findings
 - `text` and `json` output
 - Strict mode for CI (`--strict`)
 
@@ -32,6 +33,24 @@ With allowlist:
 
 ```bash
 cargo run -- . --allowlist .secrets-allowlist --strict
+```
+
+Create a baseline from current findings:
+
+```bash
+cargo run -- . --write-baseline .secret-sentinel-baseline.json
+```
+
+Scan using baseline suppression:
+
+```bash
+cargo run -- . --baseline .secret-sentinel-baseline.json --strict
+```
+
+Install pre-commit hook:
+
+```bash
+cargo run -- --install-pre-commit
 ```
 
 ## Exit codes
