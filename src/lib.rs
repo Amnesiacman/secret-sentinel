@@ -25,6 +25,7 @@ pub struct Finding {
 
 #[derive(Debug, Serialize)]
 pub struct ScanReport {
+    pub schema_version: String,
     pub scanned_files: usize,
     pub total_findings: usize,
     pub ok: bool,
@@ -54,6 +55,8 @@ pub struct ScannerConfig {
     pub entropy_threshold: f64,
     #[serde(default = "default_entropy_min_length")]
     pub min_entropy_length: usize,
+    #[serde(default = "default_max_file_bytes")]
+    pub max_file_bytes: u64,
 }
 
 impl Default for ScannerConfig {
@@ -64,6 +67,7 @@ impl Default for ScannerConfig {
             disable_rules: vec![],
             entropy_threshold: default_entropy_threshold(),
             min_entropy_length: default_entropy_min_length(),
+            max_file_bytes: default_max_file_bytes(),
         }
     }
 }
@@ -83,6 +87,7 @@ pub struct ScanOptions {
     pub disabled_rules: Vec<String>,
     pub entropy_threshold: f64,
     pub entropy_min_length: usize,
+    pub max_file_bytes: u64,
 }
 
 impl Default for ScanOptions {
@@ -94,6 +99,7 @@ impl Default for ScanOptions {
             disabled_rules: vec![],
             entropy_threshold: default_entropy_threshold(),
             entropy_min_length: default_entropy_min_length(),
+            max_file_bytes: default_max_file_bytes(),
         }
     }
 }
@@ -108,6 +114,10 @@ fn default_entropy_threshold() -> f64 {
 
 fn default_entropy_min_length() -> usize {
     20
+}
+
+fn default_max_file_bytes() -> u64 {
+    1_000_000
 }
 
 fn compile_rules(disabled_rules: &HashSet<String>) -> Vec<Rule> {
@@ -180,6 +190,7 @@ pub fn build_scan_options(config: &Config, allowlist_path: Option<PathBuf>) -> S
         disabled_rules: config.scanner.disable_rules.clone(),
         entropy_threshold: config.scanner.entropy_threshold,
         entropy_min_length: config.scanner.min_entropy_length,
+        max_file_bytes: config.scanner.max_file_bytes,
     }
 }
 
@@ -280,9 +291,20 @@ pub fn scan_paths(paths: &[PathBuf], options: &ScanOptions) -> ScanReport {
         if should_skip_file(&file, &options.exclude_paths) {
             continue;
         }
-        let Ok(content) = fs::read_to_string(&file) else {
+        let Ok(metadata) = fs::metadata(&file) else {
             continue;
         };
+        if metadata.len() > options.max_file_bytes {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&file) else {
+            continue;
+        };
+        if bytes.contains(&0) {
+            continue;
+        }
+        let content = String::from_utf8_lossy(&bytes);
+
         scanned_files += 1;
         for (idx, line) in content.lines().enumerate() {
             for rule in &rules {
@@ -316,6 +338,7 @@ pub fn scan_paths(paths: &[PathBuf], options: &ScanOptions) -> ScanReport {
     });
 
     ScanReport {
+        schema_version: "1.0".to_string(),
         scanned_files,
         total_findings: findings.len(),
         ok: findings.is_empty(),
@@ -337,6 +360,7 @@ pub fn apply_baseline(report: ScanReport, baseline_signatures: &[String]) -> Sca
         .collect();
 
     ScanReport {
+        schema_version: report.schema_version,
         scanned_files: report.scanned_files,
         total_findings: filtered_findings.len(),
         ok: filtered_findings.is_empty(),
@@ -344,8 +368,21 @@ pub fn apply_baseline(report: ScanReport, baseline_signatures: &[String]) -> Sca
     }
 }
 
+pub fn prune_baseline(baseline_signatures: &[String], report: &ScanReport) -> Vec<String> {
+    let current: HashSet<String> = report.findings.iter().map(finding_signature).collect();
+    baseline_signatures
+        .iter()
+        .filter(|item| current.contains(*item))
+        .cloned()
+        .collect()
+}
+
 pub fn write_baseline(path: &Path, report: &ScanReport) -> std::io::Result<()> {
     let signatures = report.findings.iter().map(finding_signature).collect();
+    write_baseline_signatures(path, signatures)
+}
+
+pub fn write_baseline_signatures(path: &Path, signatures: Vec<String>) -> std::io::Result<()> {
     let baseline = Baseline { signatures };
     let content = serde_json::to_string_pretty(&baseline).expect("serialize baseline");
     fs::write(path, content + "\n")
@@ -353,6 +390,7 @@ pub fn write_baseline(path: &Path, report: &ScanReport) -> std::io::Result<()> {
 
 pub fn report_as_text(report: &ScanReport) -> String {
     let mut lines = vec![
+        format!("Schema version: {}", report.schema_version),
         format!("Scanned files: {}", report.scanned_files),
         format!("Findings: {}", report.total_findings),
         format!("Status: {}", if report.ok { "ok" } else { "failed" }),
@@ -480,6 +518,7 @@ exclude_paths = ["target/"]
 disable_rules = ["github_token"]
 entropy_threshold = 4.5
 min_entropy_length = 24
+max_file_bytes = 2048
 "#,
         )
         .expect("write config");
@@ -487,5 +526,6 @@ min_entropy_length = 24
         assert!(!config.scanner.respect_gitignore);
         assert_eq!(config.scanner.exclude_paths.len(), 1);
         assert_eq!(config.scanner.disable_rules.len(), 1);
+        assert_eq!(config.scanner.max_file_bytes, 2048);
     }
 }

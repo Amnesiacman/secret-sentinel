@@ -56,6 +56,12 @@ Scan using baseline suppression:
 cargo run -- . --baseline .secret-sentinel-baseline.json --strict
 ```
 
+Prune baseline entries that no longer appear:
+
+```bash
+cargo run -- . --prune-baseline .secret-sentinel-baseline.json
+```
+
 Install pre-commit hook:
 
 ```bash
@@ -83,3 +89,4 @@ min_entropy_length = 20
 
 - `0`: no blocking issues (or strict mode disabled)
 - `1`: findings exist at or above selected threshold when `--strict` is enabled (`--fail-on`)
+- `3`: IO/config processing error (for example, baseline write failure)

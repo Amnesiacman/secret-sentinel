@@ -1,7 +1,8 @@
 use clap::{Parser, ValueEnum};
 use secret_sentinel::{
     Severity, apply_baseline, build_scan_options, has_findings_at_or_above, load_baseline,
-    load_config, report_as_sarif, report_as_text, scan_paths, write_baseline,
+    load_config, prune_baseline, report_as_sarif, report_as_text, scan_paths, write_baseline,
+    write_baseline_signatures,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -42,6 +43,9 @@ struct Cli {
 
     #[arg(long)]
     write_baseline: Option<PathBuf>,
+
+    #[arg(long)]
+    prune_baseline: Option<PathBuf>,
 
     #[arg(long)]
     install_pre_commit: bool,
@@ -146,9 +150,20 @@ fn main() {
     if let Some(path) = &cli.write_baseline {
         if let Err(err) = write_baseline(path, &report) {
             eprintln!("Failed to write baseline to {}: {err}", path.display());
-            std::process::exit(1);
+            std::process::exit(3);
         }
         println!("Wrote baseline to {}", path.display());
+        return;
+    }
+
+    if let Some(path) = &cli.prune_baseline {
+        let existing = load_baseline(Some(path));
+        let pruned = prune_baseline(&existing, &report);
+        if let Err(err) = write_baseline_signatures(path, pruned) {
+            eprintln!("Failed to prune baseline at {}: {err}", path.display());
+            std::process::exit(3);
+        }
+        println!("Pruned baseline at {}", path.display());
         return;
     }
 
