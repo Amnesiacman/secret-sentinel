@@ -15,7 +15,10 @@
 - Allowlist support
 - Baseline file support for known findings
 - `text` and `json` output
+- `sarif` output for code scanning pipelines
 - Strict mode for CI (`--strict`)
+- Git-aware mode with `--staged`
+- TOML config support (`--config secret-sentinel.toml`)
 
 ## Usage
 
@@ -27,6 +30,12 @@ JSON output:
 
 ```bash
 cargo run -- . --format json
+```
+
+SARIF output:
+
+```bash
+cargo run -- . --format sarif
 ```
 
 With allowlist:
@@ -53,7 +62,24 @@ Install pre-commit hook:
 cargo run -- --install-pre-commit
 ```
 
+Scan only staged changes:
+
+```bash
+cargo run -- --staged --strict --fail-on high
+```
+
+## Config example (`secret-sentinel.toml`)
+
+```toml
+[scanner]
+respect_gitignore = true
+exclude_paths = ["target/", "fixtures/"]
+disable_rules = ["github_token"]
+entropy_threshold = 4.2
+min_entropy_length = 20
+```
+
 ## Exit codes
 
 - `0`: no blocking issues (or strict mode disabled)
-- `1`: findings exist and `--strict` is enabled
+- `1`: findings exist at or above selected threshold when `--strict` is enabled (`--fail-on`)
